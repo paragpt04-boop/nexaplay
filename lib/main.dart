@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:video_player/video_player.dart';
+import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -916,14 +916,12 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  VideoPlayerController? _vpc;
-  bool _isInit = false;
-  bool _showControls = true;
-  bool _isFullscreen = false;
-  bool _isBuffering = true;
+  VlcPlayerController? _vlc;
+  bool _showControls = true, _isFullscreen = false, _isPlaying = false, _isBuffering = true;
   late Channel _current;
   int _currentIdx = 0;
   String _error = '';
+  Duration _position = Duration.zero, _duration = Duration.zero;
 
   @override
   void initState() {
@@ -934,170 +932,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _initPlayer(_current.url);
   }
 
-  Future<void> _initPlayer(String url) async {
-    await _vpc?.dispose();
-    setState(() { _isInit = false; _isBuffering = true; _error = ''; });
-
-    try {
-      _vpc = VideoPlayerController.networkUrl(Uri.parse(url));
-      await _vpc!.initialize();
-      _vpc!.play();
-      _vpc!.addListener(() {
-        if (mounted) {
-          setState(() {
-            _isBuffering = _vpc!.value.isBuffering;
-          });
-        }
-      });
-      setState(() => _isInit = true);
-    } catch (e) {
-      setState(() => _error = 'Error al reproducir: $e');
-    }
-
-    // Auto-hide controles
-    Future.delayed(const Duration(seconds: 4), () {
-      if (mounted) setState(() => _showControls = false);
+  void _initPlayer(String url) {
+    _vlc?.dispose();
+    setState(() { _isBuffering = true; _error = ''; _position = Duration.zero; _duration = Duration.zero; });
+    _vlc = VlcPlayerController.network(url, autoPlay: true, hwAcc: HwAcc.full,
+      options: VlcPlayerOptions(advanced: VlcAdvancedOptions([VlcAdvancedOptions.networkCaching(3000)]), http: VlcHttpOptions([VlcHttpOptions.httpReconnect(true)])));
+    _vlc!.addListener(() {
+      if (!mounted) return;
+      final v = _vlc!.value;
+      setState(() { _isPlaying = v.isPlaying; _isBuffering = v.isBuffering; _position = v.position; _duration = v.duration; if (v.hasError) _error = 'Error al reproducir'; });
     });
+    Future.delayed(const Duration(seconds: 4), () { if (mounted) setState(() => _showControls = false); });
   }
 
-  void _toggleFullscreen() {
+  void _toggleFs() {
     setState(() => _isFullscreen = !_isFullscreen);
-    if (_isFullscreen) {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    }
+    if (_isFullscreen) { SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }
+    else { SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); }
   }
 
-  void _nextChannel() {
-    if (widget.playlist.isEmpty) return;
-    _currentIdx = (_currentIdx + 1) % widget.playlist.length;
-    _current = widget.playlist[_currentIdx];
-    _initPlayer(_current.url);
-  }
-
-  void _prevChannel() {
-    if (widget.playlist.isEmpty) return;
-    _currentIdx = (_currentIdx - 1 + widget.playlist.length) % widget.playlist.length;
-    _current = widget.playlist[_currentIdx];
-    _initPlayer(_current.url);
-  }
+  void _next() { if (widget.playlist.isEmpty) return; _currentIdx = (_currentIdx + 1) % widget.playlist.length; _current = widget.playlist[_currentIdx]; _initPlayer(_current.url); }
+  void _prev() { if (widget.playlist.isEmpty) return; _currentIdx = (_currentIdx - 1 + widget.playlist.length) % widget.playlist.length; _current = widget.playlist[_currentIdx]; _initPlayer(_current.url); }
 
   @override
-  void dispose() {
-    _vpc?.dispose();
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    super.dispose();
-  }
+  void dispose() { _vlc?.dispose(); SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); super.dispose(); }
+
+  String _fmt(Duration d) { final h = d.inHours; final m = d.inMinutes.remainder(60).toString().padLeft(2, '0'); final s = d.inSeconds.remainder(60).toString().padLeft(2, '0'); return h > 0 ? '$h:$m:$s' : '$m:$s'; }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: Colors.black,
-    body: GestureDetector(
-      onTap: () => setState(() => _showControls = !_showControls),
-      onDoubleTap: () {
-        if (_vpc != null && _isInit) {
-          _vpc!.value.isPlaying ? _vpc!.pause() : _vpc!.play();
-        }
-      },
-      onHorizontalDragEnd: (details) {
-        if ((details.primaryVelocity ?? 0) < -200) _nextChannel();
-        if ((details.primaryVelocity ?? 0) > 200) _prevChannel();
-      },
-      child: Stack(children: [
-        // Video
-        Center(
-          child: _error.isNotEmpty
-            ? Column(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.error, color: kRed, size: 48),
-                const SizedBox(height: 8),
-                Text(_error, style: const TextStyle(color: kT2, fontSize: 12), textAlign: TextAlign.center),
-              ])
-            : _isInit && _vpc != null
-              ? AspectRatio(aspectRatio: _vpc!.value.aspectRatio, child: VideoPlayer(_vpc!))
-              : const CircularProgressIndicator(color: kCyan),
-        ),
-
-        // Buffering
-        if (_isBuffering && _isInit) const Center(child: CircularProgressIndicator(color: kCyan, strokeWidth: 2)),
-
-        // Controles overlay
-        if (_showControls) ...[
-          // Top bar
-          Positioned(top: 0, left: 0, right: 0, child: Container(
-            decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black.withOpacity(0.8), Colors.transparent])),
-            child: SafeArea(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), child: Row(children: [
-              IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                Text(_current.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14), overflow: TextOverflow.ellipsis),
-                Text(_current.group, style: const TextStyle(color: kT2, fontSize: 11)),
-              ])),
-            ]))),
-          )),
-
-          // Center controls
-          Center(child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (widget.playlist.length > 1) IconButton(
-              icon: const Icon(Icons.skip_previous, color: Colors.white, size: 36),
-              onPressed: _prevChannel,
-            ),
-            const SizedBox(width: 16),
-            GestureDetector(
-              onTap: () {
-                if (_vpc != null && _isInit) {
-                  setState(() { _vpc!.value.isPlaying ? _vpc!.pause() : _vpc!.play(); });
-                }
-              },
-              child: Container(
-                width: 64, height: 64,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: kCyan.withOpacity(0.3)),
-                child: Icon(
-                  _vpc != null && _isInit && _vpc!.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                  color: Colors.white, size: 38,
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-            if (widget.playlist.length > 1) IconButton(
-              icon: const Icon(Icons.skip_next, color: Colors.white, size: 36),
-              onPressed: _nextChannel,
-            ),
-          ])),
-
-          // Bottom bar
-          Positioned(bottom: 0, left: 0, right: 0, child: Container(
-            decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black.withOpacity(0.8), Colors.transparent])),
-            child: SafeArea(top: false, child: Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 8), child: Column(mainAxisSize: MainAxisSize.min, children: [
-              if (_isInit && _vpc != null) SliderTheme(
-                data: SliderThemeData(trackHeight: 3, thumbColor: kCyan, activeTrackColor: kCyan, inactiveTrackColor: Colors.white24, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6)),
-                child: Slider(
-                  value: _vpc!.value.duration.inSeconds > 0 ? _vpc!.value.position.inSeconds.toDouble().clamp(0, _vpc!.value.duration.inSeconds.toDouble()) : 0,
-                  max: _vpc!.value.duration.inSeconds > 0 ? _vpc!.value.duration.inSeconds.toDouble() : 1,
-                  onChanged: (v) { _vpc!.seekTo(Duration(seconds: v.toInt())); },
-                ),
-              ),
-              Row(children: [
-                if (_isInit && _vpc != null) Text(_fmt(_vpc!.value.position), style: const TextStyle(color: Colors.white, fontSize: 11)),
-                if (_isInit && _vpc != null) Text(" / ${_fmt(_vpc!.value.duration)}", style: const TextStyle(color: kT3, fontSize: 11)),
-                const Spacer(),
-                if (widget.playlist.length > 1) Text("${_currentIdx + 1}/${widget.playlist.length}", style: const TextStyle(color: kT2, fontSize: 11)),
-                const SizedBox(width: 12),
-                IconButton(icon: const Icon(Icons.fullscreen, color: Colors.white, size: 24), onPressed: _toggleFullscreen),
-              ]),
-            ]))),
-          )),
-        ],
-      ]),
-    ),
-  );
-
-  String _fmt(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return h > 0 ? '$h:$m:$s' : '$m:$s';
-  }
+  Widget build(BuildContext context) => Scaffold(backgroundColor: Colors.black, body: GestureDetector(
+    onTap: () => setState(() => _showControls = !_showControls),
+    onDoubleTap: () { if (_vlc != null) { _isPlaying ? _vlc!.pause() : _vlc!.play(); } },
+    onHorizontalDragEnd: (d) { if ((d.primaryVelocity ?? 0) < -200) _next(); if ((d.primaryVelocity ?? 0) > 200) _prev(); },
+    child: Stack(children: [
+      Center(child: _error.isNotEmpty ? Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.error, color: kRed, size: 48), const SizedBox(height: 8), Text(_error, style: const TextStyle(color: kT2, fontSize: 12))]) : _vlc != null ? VlcPlayer(controller: _vlc!, aspectRatio: 16 / 9, placeholder: const Center(child: CircularProgressIndicator(color: kCyan))) : const CircularProgressIndicator(color: kCyan)),
+      if (_isBuffering) const Center(child: CircularProgressIndicator(color: kCyan, strokeWidth: 2)),
+      if (_showControls) ...[
+        Positioned(top: 0, left: 0, right: 0, child: Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black.withOpacity(0.8), Colors.transparent])), child: SafeArea(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), child: Row(children: [IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [Text(_current.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14), overflow: TextOverflow.ellipsis), Text(_current.group, style: const TextStyle(color: kT2, fontSize: 11))]))])))),
+        Center(child: Row(mainAxisSize: MainAxisSize.min, children: [if (widget.playlist.length > 1) IconButton(icon: const Icon(Icons.skip_previous, color: Colors.white, size: 36), onPressed: _prev), const SizedBox(width: 16), GestureDetector(onTap: () { if (_vlc != null) { _isPlaying ? _vlc!.pause() : _vlc!.play(); } }, child: Container(width: 64, height: 64, decoration: BoxDecoration(shape: BoxShape.circle, color: kCyan.withOpacity(0.3)), child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 38))), const SizedBox(width: 16), if (widget.playlist.length > 1) IconButton(icon: const Icon(Icons.skip_next, color: Colors.white, size: 36), onPressed: _next)])),
+        Positioned(bottom: 0, left: 0, right: 0, child: Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black.withOpacity(0.8), Colors.transparent])), child: SafeArea(top: false, child: Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 8), child: Column(mainAxisSize: MainAxisSize.min, children: [SliderTheme(data: SliderThemeData(trackHeight: 3, thumbColor: kCyan, activeTrackColor: kCyan, inactiveTrackColor: Colors.white24, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6)), child: Slider(value: _duration.inSeconds > 0 ? _position.inSeconds.toDouble().clamp(0, _duration.inSeconds.toDouble()) : 0, max: _duration.inSeconds > 0 ? _duration.inSeconds.toDouble() : 1, onChanged: (v) { _vlc?.seekTo(Duration(seconds: v.toInt())); })), Row(children: [Text(_fmt(_position), style: const TextStyle(color: Colors.white, fontSize: 11)), Text(' / ${_fmt(_duration)}', style: const TextStyle(color: kT3, fontSize: 11)), const Spacer(), if (widget.playlist.length > 1) Text('${_currentIdx + 1}/${widget.playlist.length}', style: const TextStyle(color: kT2, fontSize: 11)), const SizedBox(width: 12), IconButton(icon: const Icon(Icons.fullscreen, color: Colors.white, size: 24), onPressed: _toggleFs)])]))))),
+      ],
+    ]),
+  ));
 }

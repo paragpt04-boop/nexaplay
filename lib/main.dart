@@ -1070,18 +1070,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
           // Bottom bar
           Positioned(bottom: 0, left: 0, right: 0, child: Container(
             decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black.withOpacity(0.8), Colors.transparent])),
-            child: SafeArea(top: false, child: Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 8), child: Row(children: [
-              if (_isInit && _vpc != null) Text(
-                _fmt(_vpc!.value.position),
-                style: const TextStyle(color: Colors.white, fontSize: 11),
+            child: SafeArea(top: false, child: Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 8), child: Column(mainAxisSize: MainAxisSize.min, children: [
+              if (_isInit && _vpc != null) SliderTheme(
+                data: SliderThemeData(trackHeight: 3, thumbColor: kCyan, activeTrackColor: kCyan, inactiveTrackColor: Colors.white24, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6)),
+                child: Slider(
+                  value: _vpc!.value.duration.inSeconds > 0 ? _vpc!.value.position.inSeconds.toDouble().clamp(0, _vpc!.value.duration.inSeconds.toDouble()) : 0,
+                  max: _vpc!.value.duration.inSeconds > 0 ? _vpc!.value.duration.inSeconds.toDouble() : 1,
+                  onChanged: (v) { _vpc!.seekTo(Duration(seconds: v.toInt())); },
+                ),
               ),
-              const Spacer(),
-              if (widget.playlist.length > 1) Text(
-                '${_currentIdx + 1}/${widget.playlist.length}',
-                style: const TextStyle(color: kT2, fontSize: 11),
-              ),
-              const SizedBox(width: 12),
-              IconButton(icon: const Icon(Icons.fullscreen, color: Colors.white, size: 24), onPressed: _toggleFullscreen),
+              Row(children: [
+                if (_isInit && _vpc != null) Text(_fmt(_vpc!.value.position), style: const TextStyle(color: Colors.white, fontSize: 11)),
+                if (_isInit && _vpc != null) Text(" / ${_fmt(_vpc!.value.duration)}", style: const TextStyle(color: kT3, fontSize: 11)),
+                const Spacer(),
+                if (widget.playlist.length > 1) Text("${_currentIdx + 1}/${widget.playlist.length}", style: const TextStyle(color: kT2, fontSize: 11)),
+                const SizedBox(width: 12),
+                IconButton(icon: const Icon(Icons.fullscreen, color: Colors.white, size: 24), onPressed: _toggleFullscreen),
+              ]),
             ]))),
           )),
         ],

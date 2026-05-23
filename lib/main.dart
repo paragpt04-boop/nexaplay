@@ -936,8 +936,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _initPlayer(String url) async {
     await _vpc?.dispose();
-    setState(() { _isInit = false; _isBuffering = true; _error = ''; });
-    // Auto-fix: si es https en puerto 80, cambiar a http
+    setState(() { _isInit = false; _isBuffering = true; _error = ""; });
     if (url.startsWith("https://") && url.contains(":80")) {
       url = url.replaceFirst("https://", "http://");
     }
@@ -948,16 +947,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _vpc!.addListener(() { if (mounted) setState(() { _isBuffering = _vpc!.value.isBuffering; }); });
       setState(() => _isInit = true);
     } catch (e) {
-      // Reintentar con http si era https o viceversa
       try {
-        String alt = url.startsWith("https://") ? url.replaceFirst("https://", "http://") : url.replaceFirst("http://", "https://");
+        final alt = url.startsWith("https://") ? url.replaceFirst("https://", "http://") : url.replaceFirst("http://", "https://");
         await _vpc?.dispose();
         _vpc = VideoPlayerController.networkUrl(Uri.parse(alt));
         await _vpc!.initialize();
         _vpc!.play();
         _vpc!.addListener(() { if (mounted) setState(() { _isBuffering = _vpc!.value.isBuffering; }); });
         setState(() => _isInit = true);
-      } catch (e2) {
+      } catch (_) {
         setState(() => _error = "Error al reproducir");
       }
     }

@@ -963,10 +963,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     Future.delayed(const Duration(seconds: 4), () { if (mounted) setState(() => _showControls = false); });
   }
-    Future.delayed(const Duration(seconds: 4), () {
-      if (mounted) setState(() => _showControls = false);
-    });
-  }
 
   void _toggleFullscreen() {
     setState(() => _isFullscreen = !_isFullscreen);
